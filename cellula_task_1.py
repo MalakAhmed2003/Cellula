@@ -62,21 +62,25 @@ for i in range(5):
     ax[i].axis('off')
 plt.show()
 
+import torch
+import torch.nn as nn
+
 class SimpleCNN(nn.Module):
     def __init__(self, num_classes):
         super(SimpleCNN, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
 
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, padding=1),  
             nn.ReLU(),
-            nn.MaxPool2d(2),
+            nn.MaxPool2d(2),                             
+
+            nn.Conv2d(16, 32, kernel_size=3, padding=1), 
+            nn.ReLU(),
+            nn.MaxPool2d(2),                             
         )
 
-        self._to_linear = None
-        self._initialize_linear_layer()
+       
+        self._to_linear = 32 * 32 * 32
 
         self.classifier = nn.Sequential(
             nn.Flatten(),
@@ -85,23 +89,13 @@ class SimpleCNN(nn.Module):
             nn.Linear(128, num_classes)
         )
 
-    def _initialize_linear_layer(self):
-
-        with torch.no_grad():
-            dummy_input = torch.zeros(1, 3, 128, 128)
-            dummy_output = self.features(dummy_input)
-            self._to_linear = dummy_output.view(1, -1).shape[1]
-
     def forward(self, x):
         x = self.features(x)
         x = self.classifier(x)
         return x
-
-model = models.resnet18(pretrained=True)
-num_features = model.fc.in_features
-model.fc = nn.Linear(num_features, len(dataset.classes))
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+model = SimpleCNN(num_classes=len(dataset.classes))
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
