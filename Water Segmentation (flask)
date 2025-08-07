@@ -1,0 +1,100 @@
+# Note that: the model used for segmentation here is downloaded from task_4 file in the same repository
+
+
+
+from flask import Flask, render_template, request, send_file
+import torch
+import numpy as np
+import tifffile
+import tifffile as tiff
+from PIL import Image
+import io
+
+app = Flask(__name__)
+
+# === Load your model ===
+model = torch.load("model.pth", map_location='cpu', weights_only=False)
+
+model.eval()
+
+# === Normalization values ===
+mean = np.array([0.5] * 12)
+std = np.array([0.2] * 12)
+
+# === Preprocess uploaded .tif ===
+def preprocess_tif_image(file_stream):
+    img = tifffile.imread(file_stream)  # [H, W, 12]
+    if img.shape[-1] != 12:
+        raise ValueError("Image must have 12 channels")
+    img = (img - mean) / std
+    img = np.transpose(img, (2, 0, 1))  # [C, H, W]
+    return torch.tensor(img, dtype=torch.float32).unsqueeze(0)
+
+# === Home Page Route ===
+@app.route("/", methods=["GET"])
+def index():
+    return render_template("index.html")
+
+# === SEGMENT Route ===
+@app.route("/", methods=["POST"])
+def segment():
+    if 'image' not in request.files:
+        return "❌ No file part in the request"
+
+    file = request.files['image']
+
+    if file.filename == '':
+        return "❌ No selected file"
+
+    try:
+        # ✅ Read bytes from file (do NOT use file.stream directly)
+        file_bytes = file.read()
+
+        # ✅ Load the .tif image from bytes
+        img = tiff.imread(io.BytesIO(file_bytes))  # (H, W, C)
+
+        if img.ndim != 3 or img.shape[2] != 12:
+            return f"❌ Expected a 12-channel image, but got shape: {img.shape}"
+
+        # Normalize and format
+        img = img.astype(np.float32) / 255.0
+        img_tensor = torch.tensor(img).permute(2, 0, 1).unsqueeze(0)  # [1, 12, H, W]
+
+        with torch.no_grad():
+            output = model(img_tensor)['out']
+            pred = torch.argmax(output, dim=1).squeeze().numpy()
+
+        # Convert prediction to image
+        result = Image.fromarray((pred * 255).astype(np.uint8))
+        buf = io.BytesIO()
+        result.save(buf, format='PNG')
+        buf.seek(0)
+        return send_file(buf, mimetype='image/png')
+
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+# === Run the app ===
+if __name__ == "__main__":
+    app.run(debug=True)
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Water Segmentation</title>
+</head>
+<body>
+    <h2>Upload a 12-channel .tif image</h2>
+    <form method="POST" enctype="multipart/form-data">
+        <input type="file" name="image" accept=".tif" required>
+        <input type="submit" value="Segment">
+    </form>
+</body>
+</html>
